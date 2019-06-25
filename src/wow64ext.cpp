@@ -20,62 +20,22 @@
  *
  */
 
+#undef WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <cstddef>
 #include "internal.h"
 #include "wow64ext.h"
 #include "CMemPtr.h"
 
-HANDLE g_heap;
-BOOL g_isWow64;
-
-void* malloc(size_t size)
-{
-	return HeapAlloc(g_heap, 0, size);
-}
-
-void free(void* ptr)
-{
-	if (nullptr != ptr)
-		HeapFree(g_heap, 0, ptr);
-}
-
-int _wcsicmp(const wchar_t *string1, const wchar_t *string2)
-{
-	wchar_t c1;
-	wchar_t c2;
-	int i = 0;
-	do
-	{
-		c1 = string1[i];
-		if (c1 >= 'A' && c1 <= 'Z')
-			c1 += 0x20;
-
-		c2 = string2[i];
-		if (c2 >= 'A' && c2 <= 'Z')
-			c2 += 0x20;
-
-		i++;
-	} while (c1 && c1 == c2);
-	return c1 - c2;
-}
-
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
-{
-	if (DLL_PROCESS_ATTACH == fdwReason)
-	{
-		IsWow64Process(GetCurrentProcess(), &g_isWow64);
-		g_heap = GetProcessHeap();
-	}
-    return TRUE;
-}
-
 #pragma warning(push)
 #pragma warning(disable : 4409)
-extern "C" __declspec(dllexport) DWORD64 __cdecl X64Call(DWORD64 func, int argC, ...)
+extern "C" __declspec(SPEC) DWORD64 __cdecl X64Call(DWORD64 func, int argC, ...)
 {
-	if (!g_isWow64)
-		return 0;
+    BOOL isWow64 = FALSE;
+    IsWow64Process(GetCurrentProcess(), &isWow64);
+
+    if (!isWow64)
+        return 0;
 
     va_list args;
     va_start(args, argC);
@@ -295,10 +255,13 @@ DWORD64 getTEB64()
     return reg.v;
 }
 
-extern "C" __declspec(dllexport) DWORD64 __cdecl GetModuleHandle64(wchar_t* lpModuleName)
+extern "C" __declspec(SPEC) DWORD64 __cdecl GetModuleHandle64(wchar_t* lpModuleName)
 {
-	if (!g_isWow64)
-		return 0;
+    BOOL isWow64 = FALSE;
+    IsWow64Process(GetCurrentProcess(), &isWow64);
+
+    if (!isWow64)
+        return 0;
 
     TEB64 teb64;
     getMem64(&teb64, getTEB64(), sizeof(TEB64));
@@ -315,7 +278,7 @@ extern "C" __declspec(dllexport) DWORD64 __cdecl GetModuleHandle64(wchar_t* lpMo
     {
         getMem64(&head, head.InLoadOrderLinks.Flink, sizeof(LDR_DATA_TABLE_ENTRY64));
 
-        wchar_t* tempBuf = (wchar_t*)malloc(head.BaseDllName.MaximumLength);
+        wchar_t* tempBuf = (wchar_t*)HeapAlloc(GetProcessHeap(), 0, head.BaseDllName.MaximumLength);
         if (nullptr == tempBuf)
             return 0;
         WATCH(tempBuf);
@@ -359,19 +322,19 @@ DWORD64 getLdrGetProcedureAddress()
     IMAGE_EXPORT_DIRECTORY ied;
     getMem64(&ied, modBase + idd.VirtualAddress, sizeof(ied));
 
-    DWORD* rvaTable = (DWORD*)malloc(sizeof(DWORD)*ied.NumberOfFunctions);
+    DWORD* rvaTable = (DWORD*)HeapAlloc(GetProcessHeap(), 0, sizeof(DWORD)*ied.NumberOfFunctions);
     if (nullptr == rvaTable)
         return 0;
     WATCH(rvaTable);
     getMem64(rvaTable, modBase + ied.AddressOfFunctions, sizeof(DWORD)*ied.NumberOfFunctions);
     
-    WORD* ordTable = (WORD*)malloc(sizeof(WORD)*ied.NumberOfFunctions);
+    WORD* ordTable = (WORD*)HeapAlloc(GetProcessHeap(), 0, sizeof(WORD)*ied.NumberOfFunctions);
     if (nullptr == ordTable)
         return 0;
     WATCH(ordTable);
     getMem64(ordTable, modBase + ied.AddressOfNameOrdinals, sizeof(WORD)*ied.NumberOfFunctions);
 
-    DWORD* nameTable = (DWORD*)malloc(sizeof(DWORD)*ied.NumberOfNames);
+    DWORD* nameTable = (DWORD*)HeapAlloc(GetProcessHeap(), 0, sizeof(DWORD)*ied.NumberOfNames);
     if (nullptr == nameTable)
         return 0;
     WATCH(nameTable);
@@ -388,7 +351,7 @@ DWORD64 getLdrGetProcedureAddress()
     return 0;
 }
 
-extern "C" __declspec(dllexport) VOID __cdecl SetLastErrorFromX64Call(DWORD64 status)
+extern "C" __declspec(SPEC) VOID __cdecl SetLastErrorFromX64Call(DWORD64 status)
 {
 	typedef ULONG (WINAPI *RtlNtStatusToDosError_t)(NTSTATUS Status);
 	typedef ULONG (WINAPI *RtlSetLastWin32Error_t)(NTSTATUS Status);
@@ -409,7 +372,7 @@ extern "C" __declspec(dllexport) VOID __cdecl SetLastErrorFromX64Call(DWORD64 st
 	}
 }
 
-extern "C" __declspec(dllexport) DWORD64 __cdecl GetProcAddress64(DWORD64 hModule, char* funcName)
+extern "C" __declspec(SPEC) DWORD64 __cdecl GetProcAddress64(DWORD64 hModule, char* funcName)
 {
     static DWORD64 _LdrGetProcedureAddress = 0;
     if (0 == _LdrGetProcedureAddress)
@@ -428,7 +391,7 @@ extern "C" __declspec(dllexport) DWORD64 __cdecl GetProcAddress64(DWORD64 hModul
     return funcRet;
 }
 
-extern "C" __declspec(dllexport) SIZE_T __cdecl VirtualQueryEx64(HANDLE hProcess, DWORD64 lpAddress, MEMORY_BASIC_INFORMATION64* lpBuffer, SIZE_T dwLength)
+extern "C" __declspec(SPEC) SIZE_T __cdecl VirtualQueryEx64(HANDLE hProcess, DWORD64 lpAddress, MEMORY_BASIC_INFORMATION64* lpBuffer, SIZE_T dwLength)
 {
     static DWORD64 ntqvm = 0;
     if (0 == ntqvm)
@@ -444,7 +407,7 @@ extern "C" __declspec(dllexport) SIZE_T __cdecl VirtualQueryEx64(HANDLE hProcess
 	return (SIZE_T)ret;
 }
 
-extern "C" __declspec(dllexport) DWORD64 __cdecl VirtualAllocEx64(HANDLE hProcess, DWORD64 lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
+extern "C" __declspec(SPEC) DWORD64 __cdecl VirtualAllocEx64(HANDLE hProcess, DWORD64 lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
 {
     static DWORD64 ntavm = 0;
     if (0 == ntavm)
@@ -466,7 +429,7 @@ extern "C" __declspec(dllexport) DWORD64 __cdecl VirtualAllocEx64(HANDLE hProces
         return tmpAddr;
 }
 
-extern "C" __declspec(dllexport) BOOL __cdecl VirtualFreeEx64(HANDLE hProcess, DWORD64 lpAddress, SIZE_T dwSize, DWORD dwFreeType)
+extern "C" __declspec(SPEC) BOOL __cdecl VirtualFreeEx64(HANDLE hProcess, DWORD64 lpAddress, SIZE_T dwSize, DWORD dwFreeType)
 {
     static DWORD64 ntfvm = 0;
     if (0 == ntfvm)
@@ -488,7 +451,7 @@ extern "C" __declspec(dllexport) BOOL __cdecl VirtualFreeEx64(HANDLE hProcess, D
         return TRUE;
 }
 
-extern "C" __declspec(dllexport) BOOL __cdecl VirtualProtectEx64(HANDLE hProcess, DWORD64 lpAddress, SIZE_T dwSize, DWORD flNewProtect, DWORD* lpflOldProtect)
+extern "C" __declspec(SPEC) BOOL __cdecl VirtualProtectEx64(HANDLE hProcess, DWORD64 lpAddress, SIZE_T dwSize, DWORD flNewProtect, DWORD* lpflOldProtect)
 {
     static DWORD64 ntpvm = 0;
     if (0 == ntpvm)
@@ -510,7 +473,7 @@ extern "C" __declspec(dllexport) BOOL __cdecl VirtualProtectEx64(HANDLE hProcess
         return TRUE;
 }
 
-extern "C" __declspec(dllexport) BOOL __cdecl ReadProcessMemory64(HANDLE hProcess, DWORD64 lpBaseAddress, LPVOID lpBuffer, SIZE_T nSize, SIZE_T *lpNumberOfBytesRead)
+extern "C" __declspec(SPEC) BOOL __cdecl ReadProcessMemory64(HANDLE hProcess, DWORD64 lpBaseAddress, LPVOID lpBuffer, SIZE_T nSize, SIZE_T *lpNumberOfBytesRead)
 {
     static DWORD64 nrvm = 0;
     if (0 == nrvm)
@@ -534,7 +497,7 @@ extern "C" __declspec(dllexport) BOOL __cdecl ReadProcessMemory64(HANDLE hProces
     }
 }
 
-extern "C" __declspec(dllexport) BOOL __cdecl WriteProcessMemory64(HANDLE hProcess, DWORD64 lpBaseAddress, LPVOID lpBuffer, SIZE_T nSize, SIZE_T *lpNumberOfBytesWritten)
+extern "C" __declspec(SPEC) BOOL __cdecl WriteProcessMemory64(HANDLE hProcess, DWORD64 lpBaseAddress, LPVOID lpBuffer, SIZE_T nSize, SIZE_T *lpNumberOfBytesWritten)
 {
     static DWORD64 nrvm = 0;
     if (0 == nrvm)
@@ -558,7 +521,7 @@ extern "C" __declspec(dllexport) BOOL __cdecl WriteProcessMemory64(HANDLE hProce
     }
 }
 
-extern "C" __declspec(dllexport) BOOL __cdecl GetThreadContext64(HANDLE hThread, _CONTEXT64* lpContext)
+extern "C" __declspec(SPEC) BOOL __cdecl GetThreadContext64(HANDLE hThread, _CONTEXT64* lpContext)
 {
     static DWORD64 gtc = 0;
     if (0 == gtc)
@@ -577,7 +540,7 @@ extern "C" __declspec(dllexport) BOOL __cdecl GetThreadContext64(HANDLE hThread,
         return TRUE;
 }
 
-extern "C" __declspec(dllexport) BOOL __cdecl SetThreadContext64(HANDLE hThread, _CONTEXT64* lpContext)
+extern "C" __declspec(SPEC) BOOL __cdecl SetThreadContext64(HANDLE hThread, _CONTEXT64* lpContext)
 {
     static DWORD64 stc = 0;
     if (0 == stc)
