@@ -34,9 +34,7 @@ public:
     {
         if (*m_ptr && watchActive)
         {
-            if (nullptr != m_ptr)
-                HeapFree(GetProcessHeap(), 0, m_ptr);
-
+            HeapFree(GetProcessHeap(), 0, *m_ptr);
             *m_ptr = 0;
         }
     }
